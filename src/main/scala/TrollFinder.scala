@@ -34,7 +34,7 @@ object Math {
   }
 }
 
-// Test date generator
+// Test data generator
 // a is for userID (0, 199)
 // b is for movieID (0, 999)
 // c is for rating (1, 10)
@@ -61,13 +61,12 @@ class TrollFinder {
   private val sparkConf = new SparkConf().setAppName("TrollFinder").setMaster("local")
   private val sc = new SparkContext(sparkConf)
 
-//  // Generate local test input
-//  private val ratings = sc.parallelize(new TestDataGenerator().generate()).cache()
+  // Generate local test input
+  private val ratings = sc.parallelize(new TestDataGenerator().generate()).cache()
 
-  // Read input from HDFS
-  val ratings = sc.textFile(hdfsPath + "/user/azazel/*.csv")
-                      .map(x => x.replace("(", "").replace(")","").split(","))
-                      .map(x => (x(0), (x(1), x(2).toInt))).cache()
+  // uncomment following lines to read the input from hdfs
+//  // Read input from HDFS, parse it to (Any, Any, Int)
+//  val ratings = sc.textFile(hdfsPath + "/user/azazel/*.csv").map(x => x.replace("(", "").replace(")","").split(",")).map(x => (x(0), (x(1), x(2).toInt))).cache()
 
   private val movieID_rating = ratings.map(x => (x._2._1, x._2._2)).cache()
   private val userID_rating = ratings.map(x => (x._1, x._2._2)).cache()
