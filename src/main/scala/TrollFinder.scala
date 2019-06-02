@@ -9,6 +9,7 @@ object Main {
   }
 }
 
+// Helper math function for median calculation
 object Math {
   def median(list: List[Int]): Double = {
   val sz = list.size
@@ -33,51 +34,61 @@ object Math {
   }
 }
 
+// Test date generator
+// a is for userID (0, 199)
+// b is for movieID (0, 999)
+// c is for rating (1, 10)
+// potential spammers have userID >= 100
+class TestDataGenerator() {
+
+  def generate(): Seq[(Int, (Int, Int))] = {
+    var a = Seq.fill(5000)(Random.nextInt(100))
+    var b = Seq.fill(5000)(Random.nextInt(1000))
+    var c = Seq.fill(5000)(Random.nextInt(9) + 1)
+
+    a = a.union(Seq.fill(250)(Random.nextInt(100) + 100))
+    b = b.union(Seq.fill(250)(Random.nextInt(1000)))
+    c = c.union(Seq.fill(170)(1)).union(Seq.fill(80)(10))
+
+    return a zip (b zip c)
+  }
+}
+
+// Main class
 class TrollFinder {
   private val hdfsPath = "hdfs://localhost:8020"
 
-  val sparkConf = new SparkConf().setAppName("TrollFinder").setMaster("local")
-  val sc = new SparkContext(sparkConf)
+  private val sparkConf = new SparkConf().setAppName("TrollFinder").setMaster("local")
+  private val sc = new SparkContext(sparkConf)
 
-  val arr = List[Integer]()
+//  // Generate local test input
+//  private val ratings = sc.parallelize(new TestDataGenerator().generate()).cache()
 
-  var arbabik = Seq.fill(5000)(Random.nextInt(100))
-  var bikct = Seq.fill(5000)(Random.nextInt(1000))
-  var bvpuct = Seq.fill(5000)(Random.nextInt(9) + 1)
-  arbabik = arbabik.union(Seq.fill(250)(Random.nextInt(100) + 100))
-  bikct = bikct.union(Seq.fill(250)(Random.nextInt(1000)))
-  bvpuct = bvpuct.union(Seq.fill(170)(1))
-  bvpuct = bvpuct.union(Seq.fill(80)(10))
+  // Read input from HDFS
+  val ratings = sc.textFile(hdfsPath + "/user/azazel/*.csv")
+                      .map(x => x.replace("(", "").replace(")","").split(","))
+                      .map(x => (x(0), (x(1), x(2).toInt))).cache()
 
-  val ratings = sc.parallelize(arbabik zip (bikct zip bvpuct)).cache()//textFile(hdfsPath ++ "/user/azazel/*.csv").cache()
-//  val userID_ratings = sc.parallelize(arbabik zip items)
+  private val movieID_rating = ratings.map(x => (x._2._1, x._2._2)).cache()
+  private val userID_rating = ratings.map(x => (x._1, x._2._2)).cache()
 
-//  items.foreach(x => println(x.toString))
+  private val movieID_median = movieID_rating.groupByKey()
+                                      .map(x => (x._1, x._2.toList.sortWith(_ < _)))
+                                      .map(x => (x._1, Math.median(x._2))).cache()
 
-  // Terasort by movieID, get (movieID, [sorted_ratings]), convert to (movieID, median)
+  private val potentialSpammers = userID_rating.groupByKey()
+                                        .map(x => (x._1, x._2.size, x._2.toList.sum))
+                                        .filter(x => (x._2 == x._3) || (10 * x._2 == x._3))
+                                        .map(x => (x._1, 0)).cache()
 
-//  val movieID_rating = items.map(x => x.replace("(", "").replace(")","").split(",")).map(x => (x(1), x(2).toInt))
+  private val spammerID_movieID_rating_median = potentialSpammers.join(ratings)
+                                                          .map(x => (x._2._2._1, (x._1, x._2._2._2)))
+                                                          .join(movieID_median).cache()
 
-//  movieID_rating.foreach( x => println(x))
+  private val spammers = spammerID_movieID_rating_median.filter(x => math.abs(x._2._2 - x._2._1._2) >= 5)
+                                                .map(x => x._2._1._1)
+                                                .distinct()
 
-  val ratingTuples = ratings.map(x => (x._2._1, x._2._2))
-  val userID_ratings = ratings.map(x => (x._1, x._2._2))
-
-  val movieID_median = ratingTuples.groupByKey()
-                      .map(x => (x._1, x._2.toList.sortWith(_ < _)))
-                      .map(x => (x._1, Math.median(x._2)))
-
-//  val userID_movieID_median = ratings.map(x => (x._2._1, x._1)).join(movieID_median).cache()
-//
-//  userID_movieID_median.map(x => x)
-//
-  val potential_spammers = userID_ratings.groupByKey()
-                .map(x => (x._1, x._2.size, x._2.toList.sum))
-                .filter(x => (x._2 == x._3) || (10 * x._2 == x._3))
-                .map(x => (x._1, 0))
-
-  val collected = potential_spammers.join(ratings).map(x => (x._2._2._1, (x._1, x._2._2._2))).join(movieID_median)
-  val spammers = collected.filter(x => x._2._2 - x._2._1._2 >= 5 || x._2._2 - x._2._1._2 <= -5).map(x => x._2._1._1).distinct()
   println("---------- Found spammers -----------")
   spammers.foreach(println)
 }
