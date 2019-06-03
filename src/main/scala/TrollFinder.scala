@@ -68,21 +68,21 @@ class TrollFinder {
 //  // Read input from HDFS, parse it to (Any, Any, Int)
 //  val ratings = sc.textFile(hdfsPath + "/user/azazel/*.csv").map(x => x.replace("(", "").replace(")","").split(",")).map(x => (x(0), (x(1), x(2).toInt))).cache()
 
-  private val movieID_rating = ratings.map(x => (x._2._1, x._2._2)).cache()
-  private val userID_rating = ratings.map(x => (x._1, x._2._2)).cache()
+  private val movieID_rating = ratings.map(x => (x._2._1, x._2._2)).repartition(sc.defaultParallelism).cache()
+  private val userID_rating = ratings.map(x => (x._1, x._2._2)).repartition(sc.defaultParallelism).cache()
 
   private val movieID_median = movieID_rating.groupByKey()
                                       .map(x => (x._1, x._2.toList.sortWith(_ < _)))
-                                      .map(x => (x._1, Math.median(x._2))).cache()
+                                      .map(x => (x._1, Math.median(x._2))).repartition(sc.defaultParallelism).cache()
 
   private val potentialSpammers = userID_rating.groupByKey()
                                         .map(x => (x._1, x._2.size, x._2.toList.sum))
                                         .filter(x => (x._2 == x._3) || (10 * x._2 == x._3))
-                                        .map(x => (x._1, 0)).cache()
+                                        .map(x => (x._1, 0)).repartition(sc.defaultParallelism).cache()
 
   private val spammerID_movieID_rating_median = potentialSpammers.join(ratings)
                                                           .map(x => (x._2._2._1, (x._1, x._2._2._2)))
-                                                          .join(movieID_median).cache()
+                                                          .join(movieID_median).repartition(sc.defaultParallelism).cache()
 
   private val spammers = spammerID_movieID_rating_median.filter(x => math.abs(x._2._2 - x._2._1._2) >= 5)
                                                 .map(x => x._2._1._1)
