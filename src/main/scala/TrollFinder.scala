@@ -57,6 +57,7 @@ class TestDataGenerator() {
 // Main class
 class TrollFinder {
   private val hdfsPath = "hdfs://localhost:8020"
+  private val numPartitions = 3; // number of cores
 
   private val sparkConf = new SparkConf().setAppName("TrollFinder").setMaster("local")
   private val sc = new SparkContext(sparkConf)
@@ -68,21 +69,31 @@ class TrollFinder {
 //  // Read input from HDFS, parse it to (Any, Any, Int)
 //  val ratings = sc.textFile(hdfsPath + "/user/azazel/*.csv").map(x => x.replace("(", "").replace(")","").split(",")).map(x => (x(0), (x(1), x(2).toInt))).cache()
 
-  private val movieID_rating = ratings.map(x => (x._2._1, x._2._2)).repartition(sc.defaultParallelism).cache()
-  private val userID_rating = ratings.map(x => (x._1, x._2._2)).repartition(sc.defaultParallelism).cache()
+  private val movieID_rating = ratings.map(x => (x._2._1, x._2._2)).repartition(numPartitions).cache()
+  private val userID_rating = ratings.map(x => (x._1, x._2._2)).repartition(numPartitions).cache()
 
-  private val movieID_median = movieID_rating.groupByKey()
-                                      .map(x => (x._1, x._2.toList.sortWith(_ < _)))
-                                      .map(x => (x._1, Math.median(x._2))).repartition(sc.defaultParallelism).cache()
+  // Use prefix sum technique for calculating median
+  private val movieID_median = movieID_rating.sortByKey().mapPartitions(iterator => {
+    iterator.toSeq.groupBy(_._1)
+      .map(x => (x._1, (x._2.map(_._2).sum, x._2.size)))
+      .iterator
+  }).groupByKey()
+    .map(x => (x._1, x._2.map(_._1).sum, x._2.map(_._2).sum))
+    .map(x => (x._1, x._2.toDouble / x._3.toDouble))
 
-  private val potentialSpammers = userID_rating.groupByKey()
-                                        .map(x => (x._1, x._2.size, x._2.toList.sum))
-                                        .filter(x => (x._2 == x._3) || (10 * x._2 == x._3))
-                                        .map(x => (x._1, 0)).repartition(sc.defaultParallelism).cache()
+  // Use prefix sum technique for calculating (user_id, sum(ratings), ratings.size)
+  private val potentialSpammers = userID_rating.sortByKey().mapPartitions( iterator => {
+    iterator.toSeq.groupBy(_._1)
+      .map(x => (x._1, (x._2.map(_._2).sum, x._2.size)))
+      .iterator
+  }).groupByKey()
+    .map(x => (x._1, x._2.map(_._1).sum, x._2.map(_._2).sum))
+    .filter(x => (x._2 == x._3) || (x._2 == 10 * x._3))
+    .map(x => (x._1, 0)).cache()
 
   private val spammerID_movieID_rating_median = potentialSpammers.join(ratings)
                                                           .map(x => (x._2._2._1, (x._1, x._2._2._2)))
-                                                          .join(movieID_median).repartition(sc.defaultParallelism).cache()
+                                                          .join(movieID_median).cache()
 
   private val spammers = spammerID_movieID_rating_median.filter(x => math.abs(x._2._2 - x._2._1._2) >= 5)
                                                 .map(x => x._2._1._1)
