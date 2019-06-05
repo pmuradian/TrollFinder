@@ -73,7 +73,7 @@ class TrollFinder {
   private val userID_rating = ratings.map(x => (x._1, x._2._2)).repartition(numPartitions).cache()
 
   // Use prefix sum technique for calculating median
-  private val movieID_median = movieID_rating.sortByKey().mapPartitions(iterator => {
+  private val movieID_median = movieID_rating.mapPartitions(iterator => {
     iterator.toSeq.groupBy(_._1)
       .map(x => (x._1, (x._2.map(_._2).sum, x._2.size)))
       .iterator
@@ -82,7 +82,7 @@ class TrollFinder {
     .map(x => (x._1, x._2.toDouble / x._3.toDouble))
 
   // Use prefix sum technique for calculating (user_id, sum(ratings), ratings.size)
-  private val potentialSpammers = userID_rating.sortByKey().mapPartitions( iterator => {
+  private val potentialSpammers = userID_rating.mapPartitions( iterator => {
     iterator.toSeq.groupBy(_._1)
       .map(x => (x._1, (x._2.map(_._2).sum, x._2.size)))
       .iterator
